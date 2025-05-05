@@ -24,7 +24,7 @@ def get_config():
         R = 0.09,                              # Ohm
         number_of_battery = 1,
         n_cell = 6,
-        battery_Wh = 220,                     # Wh
+        battery_Wh = 2200,                     # Wh
         max_current = 115,                       # A
         max_power = 2553                        # W
     )
@@ -32,14 +32,14 @@ def get_config():
     aircraftParamConstraints = AircraftParamConstraints (
   
         span_min = 1800.0,                      # mm
-        span_max = 2200.0,                   
-        span_interval = 20.0,
+        span_max = 2800.0,                   
+        span_interval = 100.0,
     
         AR_min = 4.0,                       
         AR_max = 7.0,
-        AR_interval = 0.2,
+        AR_interval = 0.5,
         
-        taper_min = 0.40,
+        taper_min = 0.50,
         taper_max = 0.90,                      
         taper_interval = 0.05,
         
@@ -47,9 +47,9 @@ def get_config():
         twist_max = 0.0,                     
         twist_interval = 1.0,
         
-        #airfoil_list = ['sg6043','s9027','hq3011','e216','s4022']
+        airfoil_list = ['sg6043','naca4412','e216','s4022','naca2412']
         # airfoil_list = ['sg6043','s9027','hq3011','s4022']
-        airfoil_list = ['e216']
+        #airfoil_list = ['e216']
         )
     
     aerodynamicSetup = AerodynamicSetup(
@@ -67,7 +67,7 @@ def get_config():
     baseAircraft = Aircraft(
         m_fuselage = 2500,
         wing_area_blocked_by_fuselage = 72640,  # mm2
-        wing_density = 0.0000588,               # g/mm3
+        wing_density = 0.00002,               # g/mm3
 
         mainwing_span = 1800,                   # mm
         mainwing_AR = 5.45,           

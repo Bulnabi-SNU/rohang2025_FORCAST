@@ -4,7 +4,7 @@
   "image": "jaewonchung7snu/bulnabi_aiaa_container:latest",
 
   // VS Code가 인식하는 사용자 필드
-  "remoteUser": "1000",
+  "remoteUser": "root",
 
   "containerEnv": {
     "LOCAL_USER_ID": "1000",

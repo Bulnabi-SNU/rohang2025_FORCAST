@@ -154,7 +154,7 @@ class MissionAnalyzer():
         voltage_array = df['Voltage'].to_numpy()
         current_array = df['Current'].to_numpy()
         dt_array = np.diff(time_array, prepend=time_array[0])
-        cumulative_Wh = np.cumsum(voltage_array*current_array*dt_array) * self.propulsionSpecs.n_cell / 3600
+        cumulative_Wh = np.cumsum(voltage_array*current_array*dt_array) * self.propulsionSpecs.n_cell * 220 / (3600 * 49.95)
         SoC_array = 100 - (cumulative_Wh / self.propulsionSpecs.battery_Wh)*100
         mask = SoC_array >= 0
         time_array = time_array[mask]
@@ -171,7 +171,7 @@ class MissionAnalyzer():
     
     def setAuxVals(self) -> None:
         
-        self.weight = self.missionParam.m_takeoff * g
+        self.weight = self.analResult.m_empty * g
         
         self.v_takeoff = (np.sqrt((2*self.weight) / (rho*self.analResult.Sref*self.analResult.CL_flap_max)))
 
@@ -225,8 +225,9 @@ class MissionAnalyzer():
                         flag = self.vertical_takeoff_simulation(phase.numargs[0])
                         # print(f"takeoff = {flag}")
                     case PhaseType.HOVER:
-                        flag = self.hover_simulation(phase.numargs[0]) 
-                        # print(f"climb = {flag}")  
+                        flag = self.hover_simulation(phase.numargs[0])
+                        if flag == -2:
+                            return -2
                     case PhaseType.TRANSITION:
                         flag = self.transition_simulation(phase.waypoint_position)
                     case PhaseType.LEVEL_FLIGHT:
@@ -280,19 +281,18 @@ class MissionAnalyzer():
             MissionConfig(PhaseType.LEVEL_FLIGHT,      waypoint_position=WP2),
 
             #MissionConfig(PhaseType.BACK_TRANSITION),
-            #MissionConfig(PhaseType.HOVER, [180]),
+            MissionConfig(PhaseType.HOVER, [3000]),
         ]
-        result = self.run_mission(mission2)  
         
-        first_state = self.stateLog[0]
-        first_state.mission = 2 
-        last_state = self.stateLog[-1]
-        last_state.N_laps = 3   
-        last_z_pos = last_state.position[2] 
-        last_battery_voltage = last_state.battery_voltage 
-        if(result == -1 or last_z_pos < 20 or last_battery_voltage < self.presetValues.min_battery_voltage): return -1,-1
+        result = self.run_mission(mission2)
+        self.stateLog[0].mission = 2
+
+        if result == -2:                 # 전압 저하로 조기 중단
+            return self.state.phase, self.state.time
+
+        if result == -1:                 # 기타 오류
+            return -1, -1
         
-        return self.m_fuel, self.state.phase
 
     def run_mission3(self) -> float:
         result = 0
@@ -364,7 +364,7 @@ class MissionAnalyzer():
         speed = fast_norm(v)
         # Pre-calculate shared values
         dynamic_pressure = 0.5 * PhysicalConstants.rho * speed**2 * self.analResult.Sref
-        weight = self.missionParam.m_takeoff * PhysicalConstants.g
+        weight = self.analResult.m_empty * PhysicalConstants.g
         
         # Binary search instead of fsolve
         alpha_min, alpha_max = -3, 13
@@ -402,7 +402,7 @@ class MissionAnalyzer():
     def vertical_takeoff_simulation(self, h_target):
         self.dt = 0.1
         max_steps = int(30 / self.dt)
-        mass = self.missionParam.m_takeoff
+        mass = self.analResult.m_empty
         Weight = self.weight
         self.current_motor_count = 4 
         # PID gains for altitude approach
@@ -472,44 +472,37 @@ class MissionAnalyzer():
 
                 
     def hover_simulation(self, t_target):
-        
         self.dt = 0.1
-        step = 0
         max_steps = int(t_target / self.dt)
+        self.current_motor_count = 4
+
         self.state.acceleration = np.array([0.0, 0.0, 0.0])
-        self.state.velocity = np.array([0.0, 0.0, 0.0])
-        self.current_motor_count = 4 
-        
-        for step in range(max_steps):
+        self.state.velocity     = np.array([0.0, 0.0, 0.0])
+
+        for _ in range(max_steps):
             self.state.time += self.dt
             speed = fast_norm(self.state.velocity)
-            desired_thrust_per_motor = self.weight / (4*g)
-            
-            _,_,self.state.Amps,self.state.motor_input_power,self.state.throttle = thrust_reverse_solve(
-                desired_thrust_per_motor, 
-                speed,
-                self.state.battery_voltage, 
-                self.propulsionSpecs.Kv, 
-                self.propulsionSpecs.R, 
-                self.propeller_array
+
+            desired_thrust_per_motor = self.weight / (4 * g)
+            _, _, self.state.Amps, self.state.motor_input_power, self.state.throttle = \
+                thrust_reverse_solve(
+                    desired_thrust_per_motor, speed,
+                    self.state.battery_voltage,
+                    self.propulsionSpecs.Kv, self.propulsionSpecs.R,
+                    self.propeller_array
                 )
-            
+
             self.state.thrust = self.weight / g
-            T_takeoff = self.state.thrust * g
-            self.state.motor_input_power = self.state.motor_input_power * self.current_motor_count
-            
-            self.state.acceleration = calculate_acceleration_vertical_takeoff(
-                self.state.velocity,
-                self.missionParam.m_takeoff,
-                self.weight,
-                T_takeoff
-            )
-            
-            self.state.velocity += self.state.acceleration * self.dt
-            self.state.position += self.state.velocity * self.dt
-            
+            self.state.motor_input_power *= self.current_motor_count
+            self.state.acceleration = np.array([0, 0, 0])      # hover → a≈0
+
             self.updateBatteryState(self.state.battery_SoC)
             self.logState()
+
+            
+            if self.state.battery_voltage < self.presetValues.min_battery_voltage:
+                return -2        
+        return 0              
     
     def transition_simulation(self, waypoint_position):
         """
@@ -570,7 +563,7 @@ class MissionAnalyzer():
         self.current_motor_count = 4 
 
         target_xy = np.array(waypoint_position[:2])
-        mass = self.missionParam.m_takeoff
+        mass = self.analResult.m_empty
         W = mass * g
         Sref = self.analResult.Sref
 
@@ -745,7 +738,7 @@ class MissionAnalyzer():
             T_total = t_per_motor * self.presetValues.number_of_motor * g
             CD      = float(self.CD_func(alpha))
             D       = 0.5 * rho * speed**2 * self.analResult.Sref * CD
-            a_mag   = (T_total*np.cos(np.radians(alpha)) - D) / self.missionParam.m_takeoff
+            a_mag   = (T_total*np.cos(np.radians(alpha)) - D) / self.analResult.m_empty
             acc_vec = np.array([u_xy[0]*a_mag, u_xy[1]*a_mag, 0.0])
             self.state.acceleration = acc_vec
 
@@ -804,7 +797,7 @@ class MissionAnalyzer():
             phi = np.arccos(min(weight / L, 0.99))
             phi = np.clip(phi, -np.radians(10), np.radians(10))
 
-            R     = (self.missionParam.m_takeoff * speed**2) / (L * np.sin(phi))
+            R     = (self.analResult.m_empty * speed**2) / (L * np.sin(phi))
             omega = speed / R
 
             D = float(self.CD_func(alpha)) * dynamic_pressure
@@ -838,8 +831,8 @@ class MissionAnalyzer():
             if direction == "CW":
                 normal *= -1
 
-            a_tan = (T_total - D) / self.missionParam.m_takeoff
-            a_cen = (L * np.sin(phi))      / self.missionParam.m_takeoff
+            a_tan = (T_total - D) / self.analResult.m_empty
+            a_cen = (L * np.sin(phi))      / self.analResult.m_empty
 
             acc = a_tan * tangent + a_cen * normal
             self.state.acceleration = acc
@@ -892,7 +885,7 @@ class MissionAnalyzer():
         t_max        = 50.0
         steps        = int(t_max / self.dt)
 
-        mass        = self.missionParam.m_takeoff
+        mass        = self.analResult.m_empty
         W           = self.weight                     # [N]
         Sref        = self.analResult.Sref
         self.current_motor_count = 4                  # VTOL 모터 4개
@@ -991,7 +984,7 @@ class MissionAnalyzer():
                 
                 self.state.acceleration = calculate_acceleration_groundroll(
                         self.state.velocity,
-                        self.missionParam.m_takeoff,
+                        self.analResult.m_empty,
                         self.weight,
                         self.analResult.Sref,
                         self.analResult.CD_flap_zero, self.analResult.CL_flap_zero,
@@ -1029,7 +1022,7 @@ class MissionAnalyzer():
                 
                 self.state.acceleration = calculate_acceleration_groundrotation(
                         self.state.velocity,
-                        self.missionParam.m_takeoff,
+                        self.analResult.m_empty,
                         self.weight,
                         self.analResult.Sref,
                         self.analResult.CD_flap_max, self.analResult.CL_flap_max,
@@ -1162,7 +1155,7 @@ class MissionAnalyzer():
             
             self.state.acceleration = RK4_step(self.state.velocity,self.dt,
                          lambda v: calculate_acceleration_climb(v, 
-                                                                self.missionParam.m_takeoff,
+                                                                self.analResult.m_empty,
                                                                 self.weight,
                                                                 self.analResult.Sref,
                                                                 self.CL_func,
@@ -1259,7 +1252,7 @@ class MissionAnalyzer():
                 self.updateBatteryState(self.state.battery_SoC)
     
                 self.state.acceleration = RK4_step(self.state.velocity,self.dt,
-                             lambda v: calculate_acceleration_level(v,self.missionParam.m_takeoff, 
+                             lambda v: calculate_acceleration_level(v,self.analResult.m_empty, 
                                                                     self.analResult.Sref,
                                                                     self.CD_func, alpha_w_deg,
                                                                     T_cruise))
@@ -1281,7 +1274,7 @@ class MissionAnalyzer():
                 self.updateBatteryState(self.state.battery_SoC)
 
                 self.state.acceleration =  RK4_step(self.state.velocity,self.dt,
-                             lambda v: calculate_acceleration_level(v,self.missionParam.m_takeoff, 
+                             lambda v: calculate_acceleration_level(v,self.analResult.m_empty, 
                                                                     self.analResult.Sref,
                                                                     self.CD_func, alpha_w_deg,
                                                                     T_climb))
@@ -1360,8 +1353,8 @@ class MissionAnalyzer():
                             return -1
                         phi_rad = np.acos(min(weight/L,0.99))
                         
-                        a_centripetal = (L * np.sin(phi_rad)) / self.missionParam.m_takeoff
-                        R = (self.missionParam.m_takeoff * speed**2)/(L * np.sin(phi_rad))
+                        a_centripetal = (L * np.sin(phi_rad)) / self.analResult.m_empty
+                        R = (self.analResult.m_empty * speed**2)/(L * np.sin(phi_rad))
                         omega = speed / R
 
                         self.state.loadfactor = 1 / np.cos(phi_rad)
@@ -1381,7 +1374,7 @@ class MissionAnalyzer():
                         _,_,self.state.Amps,self.state.motor_input_power,self.state.throttle = thrust_reverse_solve(thrust_per_motor, speed,self.state.battery_voltage, self.propulsionSpecs.Kv, self.propulsionSpecs.R, self.propeller_array)
                         
                         T_turn = self.state.thrust * g # total N              
-                        a_tangential = (T_turn - D) / self.missionParam.m_takeoff
+                        a_tangential = (T_turn - D) / self.analResult.m_empty
                         
                         speed += a_tangential * self.dt
                         self.updateBatteryState(self.state.battery_SoC)
@@ -1400,8 +1393,8 @@ class MissionAnalyzer():
                             return -1
                         phi_rad = np.acos(min(weight/L,0.99))
 
-                        a_centripetal = (L * np.sin(phi_rad)) / self.missionParam.m_takeoff
-                        R = (self.missionParam.m_takeoff * speed**2)/(L * np.sin(phi_rad))
+                        a_centripetal = (L * np.sin(phi_rad)) / self.analResult.m_empty
+                        R = (self.analResult.m_empty * speed**2)/(L * np.sin(phi_rad))
                         omega = speed / R
 
                         self.state.loadfactor = 1 / np.cos(phi_rad)
@@ -1422,7 +1415,7 @@ class MissionAnalyzer():
                         thrust_per_motor = self.state.thrust / self.presetValues.number_of_motor
                         _,_,self.state.Amps,self.state.motor_input_power,self.state.throttle = thrust_reverse_solve(thrust_per_motor, speed,self.state.battery_voltage, self.propulsionSpecs.Kv, self.propulsionSpecs.R, self.propeller_array)
                         
-                        a_tangential = (T - D) / self.missionParam.m_takeoff
+                        a_tangential = (T - D) / self.analResult.m_empty
                         speed += a_tangential * self.dt
 
                         self.updateBatteryState(self.state.battery_SoC)
@@ -1816,9 +1809,9 @@ if __name__=="__main__":
         battery_data_path = "data/batteryDataCSV/Maxamps_2250mAh_6S.csv",
         Kv = 109.91,
         R = 0.062,
-        number_of_battery = 2,
+        number_of_battery = 1,
         n_cell = 6,
-        battery_Wh = 49.95,
+        battery_Wh = 220,
         max_current = 60,
         max_power = 1332    
     )

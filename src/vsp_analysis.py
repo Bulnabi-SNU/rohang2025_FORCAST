@@ -179,7 +179,9 @@ class VSPAnalyzer:
             
             m_boom = horizontal_distance * boom_density_boom * 2
             
-            m_empty = m_wing + m_boom + self.aircraft.m_fuselage + self.presets.m_x1
+            m_device = 172 + 106 + 95 + 1700
+            
+            m_empty = m_wing + m_boom + self.aircraft.m_fuselage + self.presets.m_x1 + m_device
             
             mass_center_x = 120 # Calculated by CG Calculater, static margin 10%
 
