@@ -1,25 +1,31 @@
 {
-    "name": "bulnabi_aiaa_vscode",
-    "image": "jaewonchung7snu/bulnabi_aiaa_container",
-    "containerEnv": {
-        "LOCAL_USER_ID": "1000",
-        "DISPLAY": ":0",
-        "WAYLAND_DISPLAY": "wayland-0",
-        "XDG_RUNTIME_DIR": "/mnt/wslg/runtime-dir",
-        "PULSE_SERVER": "/mnt/wslg/PulseServer"
+  "$schema": "https://raw.githubusercontent.com/microsoft/vscode-dev-containers/main/script-library/schemas/devcontainer.schema.json",
+  "name": "bulnabi_aiaa_vscode",
+  "image": "jaewonchung7snu/bulnabi_aiaa_container:latest",
+
+  // VS Code가 인식하는 사용자 필드
+  "remoteUser": "1000",
+
+  "containerEnv": {
+    "LOCAL_USER_ID": "1000",
+    "DISPLAY": ":0",
+    "WAYLAND_DISPLAY": "wayland-0",
+    "XDG_RUNTIME_DIR": "/mnt/wslg/runtime-dir",
+    "PULSE_SERVER": "/mnt/wslg/PulseServer"
   },
+
+  // Ubuntu 호스트에서 X11 소켓 바인드 마운트
   "mounts": [
-    "source=/run/desktop/mnt/host/wslg/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
-    "source=/run/desktop/mnt/host/wslg,target=/mnt/wslg,type=bind,consistency=cached"
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,readonly"
   ],
-      "runArgs": [
-    ],
-    "containerUser": "1000",
-    "customizations": {
-      "vscode": {
-        "extensions": [
-            "ms-python.python"
-        ]
-      }
+
+  "runArgs": [],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
     }
   }
+}

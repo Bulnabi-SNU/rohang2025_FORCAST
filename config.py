@@ -6,45 +6,45 @@ def get_config():
         m_x1 = 200,                             # g
         x1_time_margin = 10,                    # sec
         
-        throttle_takeoff = 0.9,                 # 0~1
+        throttle_takeoff = 0.55,                 # 0~1
         max_climb_angle = 40,                   # deg
         max_load = 30,                          # kg
         h_flap_transition = 5,                  # m
         
-        number_of_motor = 2,                 
+        number_of_motor = 2,               
         min_battery_voltage = 21.8,             # V 
-        score_weight_ratio = 0.5                # mission2/3 score weight ratio (0~1)
+        score_weight_ratio = 1               # mission2/3 score weight ratio (0~1)
         )
     
     propulsionSpecs = PropulsionSpecs(
-        M2_propeller_data_path = "data/propDataCSV/PER3_8x6E.csv",
+        M2_propeller_data_path = "data/propDataCSV/PER3_14x55MR.csv",
         M3_propeller_data_path = "data/propDataCSV/PER3_8x6E.csv",
         battery_data_path = "data/batteryDataCSV/Maxamps_2250mAh_6S.csv",
-        Kv = 109.91,                            # (rad/s) / V
-        R = 0.062,                              # Ohm
-        number_of_battery = 2,
+        Kv = 55,                            # (rad/s) / V
+        R = 0.09,                              # Ohm
+        number_of_battery = 1,
         n_cell = 6,
-        battery_Wh = 49.95,                     # Wh
-        max_current = 60,                       # A
-        max_power = 1332                        # W
+        battery_Wh = 220,                     # Wh
+        max_current = 115,                       # A
+        max_power = 2553                        # W
     )
     
     aircraftParamConstraints = AircraftParamConstraints (
   
-        span_min = 1750.0,                      # mm
-        span_max = 1750.0,                   
-        span_interval = 25.0,
+        span_min = 1800.0,                      # mm
+        span_max = 2200.0,                   
+        span_interval = 20.0,
     
-        AR_min = 4.50,                       
-        AR_max = 4.50,
-        AR_interval = 0.25,
+        AR_min = 4.0,                       
+        AR_max = 7.0,
+        AR_interval = 0.2,
         
-        taper_min = 0.60,
-        taper_max = 0.60,                      
+        taper_min = 0.40,
+        taper_max = 0.90,                      
         taper_interval = 0.05,
         
-        twist_min = 2.0,                        # degree
-        twist_max = 2.0,                     
+        twist_min = 3.0,                        # degree
+        twist_max = 0.0,                     
         twist_interval = 1.0,
         
         #airfoil_list = ['sg6043','s9027','hq3011','e216','s4022']
@@ -53,8 +53,8 @@ def get_config():
         )
     
     aerodynamicSetup = AerodynamicSetup(
-        alpha_start = -3,                       # degree
-        alpha_end = 10,
+        alpha_start = -10,                       # degree
+        alpha_end = 15,
         alpha_step = 1,
         fuselage_cross_section_area = 19427,    # mm2
         fuselage_Cd_datapath = "data/fuselageDragCSV/fuselageDragCoefficients.csv",
@@ -74,7 +74,7 @@ def get_config():
         mainwing_taper = 0.65,        
         mainwing_twist = 0.0,                   # degree
         mainwing_sweepback = 0,                 # degree
-        mainwing_dihedral = 5.0,                # degree
+        mainwing_dihedral = 0.0,                # degree
         mainwing_incidence = 0.0,               # degree
 
         flap_start = [0.182, 0.402],            # spanwise ratio(0~1)
@@ -100,23 +100,23 @@ def get_config():
 
     missionParamConstraints = MissionParamConstraints (
                 
-                MTOW_min = 8.0,                     # Kg
-                MTOW_max = 8.2,                  
+                MTOW_min = 6,                     # Kg
+                MTOW_max = 6,                  
                 MTOW_analysis_interval = 0.2,
                 
-                M2_max_speed_min = 34,              # m/s
-                M2_max_speed_max = 34,
+                M2_max_speed_min = 25,              # m/s
+                M2_max_speed_max = 25,
                 M3_max_speed_min = 24,
                 M3_max_speed_max = 24,
                 max_speed_analysis_interval = 2,    
                 
                 #Constraints for calculating mission2
-                M2_climb_thrust_ratio_min = 0.9, 
-                M2_climb_thrust_ratio_max = 0.9,
-                M2_turn_thrust_ratio_min = 0.7,
-                M2_turn_thrust_ratio_max = 0.7,
-                M2_level_thrust_ratio_min = 0.9,
-                M2_level_thrust_ratio_max = 0.9,
+                M2_climb_thrust_ratio_min = 0.7, 
+                M2_climb_thrust_ratio_max = 0.7,
+                M2_turn_thrust_ratio_min = 0.8,
+                M2_turn_thrust_ratio_max = 0.8,
+                M2_level_thrust_ratio_min = 0.75,
+                M2_level_thrust_ratio_max = 0.75,
                 M2_thrust_analysis_interval = 0.05,
     
                 #Constraints for calculating mission3  
@@ -128,7 +128,7 @@ def get_config():
                 M3_level_thrust_ratio_max = 0.5,
                 M3_thrust_analysis_interval = 0.05,
                 
-                wing_loading_min = 5,               # kg/m2
+                wing_loading_min = 0,               # kg/m2
                 wing_loading_max = 15
                 )
         

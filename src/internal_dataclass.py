@@ -160,6 +160,7 @@ class MissionParameters:
     climb_thrust_ratio: float
     level_thrust_ratio: float
     turn_thrust_ratio: float
+
     
     # Battery 
     propeller_data_path : str
@@ -194,13 +195,17 @@ class PlaneState:
 
 class PhaseType(Enum):
     TAKEOFF=0
-    CLIMB=1
-    LEVEL_FLIGHT=2
-    TURN=3
+    HOVER=1
+    TRANSITION=2
+    LEVEL_FLIGHT=3
+    TURN=4
+    VTOL_LEVEL_FLIGHT=5
+    BACK_TRANSITION=6
+    HOVER_TURN=7
     
 @dataclass
 class MissionConfig:
     phaseType: PhaseType
-    numargs: list[float]
+    numargs: list[float] = field(default_factory=list)
     direction: str=""
-
+    waypoint_position: list[float] = field(default_factory=list)

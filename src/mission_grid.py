@@ -32,7 +32,7 @@ def runMissionGridSearch(hashVal:str,
     MTOW_min_condition = max(missionParamConstraints.wing_loading_min * analysisResults.Sref * 1e-6,
                              analysisResults.m_empty/1000)
     MTOW_max_condition = missionParamConstraints.wing_loading_max * analysisResults.Sref * 1e-6
-    MTOW_list = MTOW_list[(MTOW_list >= MTOW_min_condition) & (MTOW_list <= MTOW_max_condition)]
+    MTOW_list = MTOW_list[(MTOW_list <= MTOW_max_condition)]
     if len(MTOW_list) == 0: 
         print(f"All MTOW options exceed wing loading limit")
         return
@@ -119,7 +119,8 @@ def runMissionGridSearch(hashVal:str,
                   
             climb_thrust_ratio = M2_climb_thrust_ratio,
             level_thrust_ratio = M2_level_thrust_ratio,
-            turn_thrust_ratio = M2_turn_thrust_ratio,   
+            turn_thrust_ratio = M2_turn_thrust_ratio,
+            
 
             propeller_data_path=propulsionSpecs.M2_propeller_data_path,
         )
@@ -145,6 +146,7 @@ def runMissionGridSearch(hashVal:str,
                 'mission2_climb_thrust_ratio': M2_climb_thrust_ratio,
                 'mission2_turn_thrust_ratio': M2_turn_thrust_ratio,
                 'mission2_level_thrust_ratio': M2_level_thrust_ratio,
+                
             }
     
             results = pd.DataFrame([results])
@@ -173,7 +175,8 @@ def runMissionGridSearch(hashVal:str,
                   
             climb_thrust_ratio = M3_climb_thrust_ratio,
             level_thrust_ratio = M3_level_thrust_ratio,
-            turn_thrust_ratio = M3_turn_thrust_ratio,   
+            turn_thrust_ratio = M3_turn_thrust_ratio,
+           
 
             propeller_data_path=propulsionSpecs.M3_propeller_data_path
         )

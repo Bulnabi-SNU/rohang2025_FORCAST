@@ -12,9 +12,10 @@ class PresetValues:
     h_flap_transition : float
     
     number_of_motor : int
+    
     min_battery_voltage: float
     
-    score_weight_ratio: float=0.5 
+    score_weight_ratio: float=1
 
 @dataclass
 class PropulsionSpecs:

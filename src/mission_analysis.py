@@ -4,6 +4,8 @@ import pandas as pd
 import time
 import concurrent.futures
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import math
 from scipy.optimize import fsolve
 from scipy.interpolate import interp1d
 from src.setup_dataclass import PresetValues, PropulsionSpecs
@@ -11,6 +13,12 @@ from src.internal_dataclass import PhysicalConstants, MissionParameters, Aircraf
 from src.propulsion import thrust_analysis, determine_max_thrust, thrust_reverse_solve, SoC2Vol
 from src.vsp_analysis import  loadAnalysisResults
 
+# use climb_ratio as vtol_level
+
+WP1 = [0,  25,  0]   # Waypoint 1
+WP2 = [0, 250,  0]   # Waypoint 2 & Transition
+WP3 = [400, 800, 0]  # Waypoint 3
+WP4 = [-400,800, 0]  # Waypoint 4
 
 ## Constant values
 g = PhysicalConstants.g
@@ -214,17 +222,26 @@ class MissionAnalyzer():
             try:
                 match phase.phaseType:
                     case PhaseType.TAKEOFF:
-                        flag = self.takeoff_simulation()
+                        flag = self.vertical_takeoff_simulation(phase.numargs[0])
                         # print(f"takeoff = {flag}")
-                    case PhaseType.CLIMB:
-                        flag = self.climb_simulation(phase.numargs[0],phase.numargs[1],phase.direction) 
+                    case PhaseType.HOVER:
+                        flag = self.hover_simulation(phase.numargs[0]) 
                         # print(f"climb = {flag}")  
+                    case PhaseType.TRANSITION:
+                        flag = self.transition_simulation(phase.waypoint_position)
                     case PhaseType.LEVEL_FLIGHT:
-                        flag = self.level_flight_simulation(phase.numargs[0],phase.direction)
+                        flag = self.waypoint_level_flight_simulation(phase.waypoint_position)
                         # print(f"level flight = {flag}")
                     case PhaseType.TURN:
-                        flag = self.turn_simulation(phase.numargs[0],phase.direction)
+                        flag = self.waypoint_turn_simulation(phase.waypoint_position, phase.direction)
                         # print(f"turn = {flag}")
+                    case PhaseType.VTOL_LEVEL_FLIGHT:
+                        self.hover_waypoint_simulation(phase.waypoint_position)
+                        flag = self.vtol_waypoint_level_flight_simulation(phase.waypoint_position)
+                    case PhaseType.HOVER_TURN:
+                        flag = self.hover_waypoint_simulation(phase.waypoint_position)
+                    case PhaseType.BACK_TRANSITION:
+                        flag = self.back_transition_simulation()
                     case _: 
                         raise ValueError("Didn't provide a correct PhaseType!")
                 if (self.state.time > M3_time_limit or self.state.battery_voltage < self.presetValues.min_battery_voltage):
@@ -244,30 +261,27 @@ class MissionAnalyzer():
 
         result = 0
         
+
         mission2 = [
-                MissionConfig(PhaseType.TAKEOFF, []),
-                MissionConfig(PhaseType.CLIMB, [30,-140], "left"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [-152], "left"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.CLIMB, [30,-10], "right"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "right"),
-                MissionConfig(PhaseType.TURN, [360], "CCW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [152], "right"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [-152], "left"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "right"),
-                MissionConfig(PhaseType.TURN, [360], "CCW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [152], "right"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [-152], "left"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "right"),
-                MissionConfig(PhaseType.TURN, [360], "CCW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [152], "right"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "left"),
-                ]
+            MissionConfig(PhaseType.TAKEOFF, [30]),
+            MissionConfig(PhaseType.HOVER,   [3]),
+
+            MissionConfig(PhaseType.VTOL_LEVEL_FLIGHT, waypoint_position=WP1),
+            MissionConfig(PhaseType.TRANSITION,        waypoint_position=WP2),
+            MissionConfig(PhaseType.LEVEL_FLIGHT,      waypoint_position=WP2),
+
+            MissionConfig(PhaseType.TURN,   waypoint_position=WP3, direction="CW"),
+            MissionConfig(PhaseType.LEVEL_FLIGHT,      waypoint_position=WP3),
+
+            MissionConfig(PhaseType.TURN,   waypoint_position=WP4, direction="CW"),
+            MissionConfig(PhaseType.LEVEL_FLIGHT,      waypoint_position=WP4),
+
+            MissionConfig(PhaseType.TURN,   waypoint_position=WP2, direction="CW"),
+            MissionConfig(PhaseType.LEVEL_FLIGHT,      waypoint_position=WP2),
+
+            #MissionConfig(PhaseType.BACK_TRANSITION),
+            #MissionConfig(PhaseType.HOVER, [180]),
+        ]
         result = self.run_mission(mission2)  
         
         first_state = self.stateLog[0]
@@ -283,16 +297,7 @@ class MissionAnalyzer():
     def run_mission3(self) -> float:
         result = 0
         mission3 = [
-                MissionConfig(PhaseType.TAKEOFF, []),
-                MissionConfig(PhaseType.CLIMB, [60,-140], "left"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [-152], "left"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.CLIMB, [60,-10], "right"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "right"),
-                MissionConfig(PhaseType.TURN, [360], "CCW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [152], "right"),
-                MissionConfig(PhaseType.TURN, [180], "CW"),
-                MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "left"),
+                MissionConfig(PhaseType.TAKEOFF, [30]),
                 ]
 
         # Run initial mission sequence
@@ -314,10 +319,10 @@ class MissionAnalyzer():
             MissionConfig(PhaseType.TURN, [360], "CCW"),
             MissionConfig(PhaseType.LEVEL_FLIGHT, [152], "right"),
             MissionConfig(PhaseType.TURN, [180], "CW"),
-            MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "left"),
+            #MissionConfig(PhaseType.LEVEL_FLIGHT, [0], "left"),
         ]
 
-        while True:
+        while self.state.N_laps < 2:
             lap_start_index = len(self.stateLog)
             self.state.N_laps += 1
             
@@ -392,8 +397,568 @@ class MissionAnalyzer():
         voltage_per_cell = SoC2Vol(self.state.battery_SoC,self.battery_array)
         self.state.battery_voltage = self.propulsionSpecs.n_cell * voltage_per_cell
         return
+    
+    
+    def vertical_takeoff_simulation(self, h_target):
+        self.dt = 0.1
+        max_steps = int(30 / self.dt)
+        mass = self.missionParam.m_takeoff
+        Weight = self.weight
+        self.current_motor_count = 4 
+        # PID gains for altitude approach
+        Kp = 1.0
+        Kd = 0.05
+
+        # reset state
+        self.state.velocity = np.array([0.0, 0.0, 0.0])
+        self.state.position = np.array([0.0, 0.0, 0.0])
+        self.state.time = 0.0
+        self.state.battery_voltage = 4.2 * self.propulsionSpecs.n_cell
+        self.state.battery_SoC = 100.0
+
+        for _ in range(max_steps):
+            z = self.state.position[2]
+            v_z = self.state.velocity[2]
+
+            # phase 1: aggressive climb until 80% of h_target
+            if z < 0.3 * h_target:
+                throttle = self.presetValues.throttle_takeoff
+                _, _, amps, power, thrust_per_motor = thrust_analysis(
+                    throttle,
+                    fast_norm(self.state.velocity),
+                    self.state.battery_voltage,
+                    self.propulsionSpecs,
+                    self.propeller_array,
+                    0
+                )
+                T_total =  4 * thrust_per_motor * g
+                a_z = (T_total - Weight) / mass
+
+            else:
+                # phase 2: PID-controlled approach to h_target
+                e_z = h_target - z
+                v_des = Kp * e_z
+                a_des = Kd * (v_des - v_z)
+                # total thrust needed = weight + m * a_des
+                T_total = Weight + mass * a_des
+                # per-motor thrust in kgf
+                thrust_per_motor = (T_total / g) / 4
+
+                _, _, amps, power, throttle = thrust_reverse_solve(
+                    thrust_per_motor,
+                    fast_norm(self.state.velocity),
+                    self.state.battery_voltage,
+                    self.propulsionSpecs.Kv,
+                    self.propulsionSpecs.R,
+                    self.propeller_array
+                )
+                a_z = (T_total - Weight) / mass
+
+            # update state
+            self.state.throttle = throttle
+            self.state.Amps = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.acceleration = np.array([0.0, 0.0, a_z])
+            self.state.velocity += self.state.acceleration * self.dt
+            self.state.position += self.state.velocity * self.dt
+            self.state.time += self.dt
+
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+
+            # phase 3: when at or above h_target and nearly zero vertical speed, stop
+            if z >= h_target and abs(v_z) < 0.1:
+                break
+
+                
+    def hover_simulation(self, t_target):
         
-   
+        self.dt = 0.1
+        step = 0
+        max_steps = int(t_target / self.dt)
+        self.state.acceleration = np.array([0.0, 0.0, 0.0])
+        self.state.velocity = np.array([0.0, 0.0, 0.0])
+        self.current_motor_count = 4 
+        
+        for step in range(max_steps):
+            self.state.time += self.dt
+            speed = fast_norm(self.state.velocity)
+            desired_thrust_per_motor = self.weight / (4*g)
+            
+            _,_,self.state.Amps,self.state.motor_input_power,self.state.throttle = thrust_reverse_solve(
+                desired_thrust_per_motor, 
+                speed,
+                self.state.battery_voltage, 
+                self.propulsionSpecs.Kv, 
+                self.propulsionSpecs.R, 
+                self.propeller_array
+                )
+            
+            self.state.thrust = self.weight / g
+            T_takeoff = self.state.thrust * g
+            self.state.motor_input_power = self.state.motor_input_power * self.current_motor_count
+            
+            self.state.acceleration = calculate_acceleration_vertical_takeoff(
+                self.state.velocity,
+                self.missionParam.m_takeoff,
+                self.weight,
+                T_takeoff
+            )
+            
+            self.state.velocity += self.state.acceleration * self.dt
+            self.state.position += self.state.velocity * self.dt
+            
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+    
+    def transition_simulation(self, waypoint_position):
+        """
+        Smoothly accelerate from hover toward the next waypoint so that
+        waypoint_level_flight_simulation can compute a nonzero heading.
+        Here we apply a small kinematic accel, but consume battery
+        exactly like in hover_simulation.
+        """
+        self.dt = 0.1
+        max_steps = int(5 / self.dt)   # 5초간
+        self.current_motor_count = 2 
+
+        # 현재 XY와 목표 XY
+        current_xy = self.state.position[:2].copy()
+        target_xy  = np.array(waypoint_position[:2])
+        delta_xy   = target_xy - current_xy
+        dist       = np.linalg.norm(delta_xy)
+        if dist < 1e-6:
+            return
+
+        u_xy = delta_xy / dist
+        accel = np.array([u_xy[0]*3, u_xy[1]*3, 0.0])
+
+        for _ in range(max_steps):
+            # 1) kinematics
+            self.state.time += self.dt
+            self.state.acceleration = accel
+            self.state.velocity     += accel * self.dt
+            self.state.position     += self.state.velocity * self.dt
+
+            # 2) thrust 계산 (hovering과 동일)
+            # 목표 추력 per motor in kgf
+            kgf_per_motor = (self.weight / g) / 4
+            speed = fast_norm(self.state.velocity)
+            _, _, amps, power, throttle = thrust_reverse_solve(
+                kgf_per_motor,
+                speed,
+                self.state.battery_voltage,
+                self.propulsionSpecs.Kv,
+                self.propulsionSpecs.R,
+                self.propeller_array
+            )
+
+            # 상태 업데이트
+            self.state.Amps            = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.throttle        = throttle
+            # thrust 기록은 hover_simulation 방식 그대로
+            self.state.thrust         = self.weight / g
+
+            # 3) 배터리 소모 & 로그
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+
+    def vtol_waypoint_level_flight_simulation(self, waypoint_position):
+        self.dt = 0.1
+        max_steps = int(180 / self.dt)
+        self.current_motor_count = 4 
+
+        target_xy = np.array(waypoint_position[:2])
+        mass = self.missionParam.m_takeoff
+        W = mass * g
+        Sref = self.analResult.Sref
+
+        for _ in range(max_steps):
+            pos_xy = self.state.position[:2]
+            delta_xy = target_xy - pos_xy
+            dist = np.linalg.norm(delta_xy)
+            if dist < 3:
+                return 0
+
+            vel_xy = self.state.velocity[:2]
+            speed_xy = np.linalg.norm(vel_xy)
+            if speed_xy < 1e-6:
+                print("Error: zero velocity; cannot determine heading. (VTOL)")
+                return -1
+            cross = vel_xy[0] * delta_xy[1] - vel_xy[1] * delta_xy[0]
+            dot   = vel_xy.dot(delta_xy)
+            if abs(cross) > 10 or dot <= 0:
+                print(f"Error: heading {vel_xy} not aligned with waypoint {target_xy}.")
+                return -1
+
+            u_xy = delta_xy / dist
+            speed = fast_norm(self.state.velocity)
+            q     = 0.5 * rho * speed**2
+
+            alpha = -5.0
+            theta = -math.radians(alpha)
+            self.state.AOA = alpha
+
+            CL = float(self.CL_func(alpha))
+            CD = float(self.CD_func(alpha))
+
+            L = q * Sref * CL
+            D = q * Sref * CD
+
+            T_total = (W - L) / math.cos(theta)
+            if T_total < 0:
+                T_total = 0.0
+
+            thrust_per_motor_kgf = (T_total / g) / 4
+
+            _, _, amps, power, throttle = thrust_reverse_solve(
+                thrust_per_motor_kgf,
+                speed,
+                self.state.battery_voltage,
+                self.propulsionSpecs.Kv,
+                self.propulsionSpecs.R,
+                self.propeller_array
+            )
+            self.state.Amps            = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.throttle        = throttle
+            self.state.thrust          = T_total / g
+            self.state.lift            = L
+
+            F_forward = T_total * math.sin(theta) - D
+            a_forward = F_forward / mass
+            accel     = np.array([u_xy[0]*a_forward, u_xy[1]*a_forward, 0.0])
+
+            self.state.time         += self.dt
+            self.state.acceleration  = accel
+            self.state.velocity     += accel * self.dt
+            self.state.position     += self.state.velocity * self.dt
+
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+
+        return 0
+
+
+
+
+    def hover_waypoint_simulation(self, waypoint_position):
+        """
+        Smoothly accelerate from hover toward the next waypoint so that
+        waypoint_level_flight_simulation can compute a nonzero heading.
+        Here we apply a small kinematic accel, but consume battery
+        exactly like in hover_simulation.
+        """
+        self.dt = 0.1
+        max_steps = int(3 / self.dt)   # 3초간
+        self.current_motor_count = 4 
+
+        # 현재 XY와 목표 XY
+        current_xy = self.state.position[:2].copy()
+        target_xy  = np.array(waypoint_position[:2])
+        delta_xy   = target_xy - current_xy
+        dist       = np.linalg.norm(delta_xy)
+        if dist < 1e-6:
+            return
+
+        u_xy = delta_xy / dist
+        accel = np.array([u_xy[0]*0.1, u_xy[1]*0.1, 0.0])
+
+        for _ in range(max_steps):
+            # 1) kinematics
+            self.state.time += self.dt
+            self.state.acceleration = accel
+            self.state.velocity     += accel * self.dt
+            self.state.position     += self.state.velocity * self.dt
+
+            # 2) thrust 계산 (hovering과 동일)
+            # 목표 추력 per motor in kgf
+            kgf_per_motor = (self.weight / g) / 4
+            speed = fast_norm(self.state.velocity)
+            _, _, amps, power, throttle = thrust_reverse_solve(
+                kgf_per_motor,
+                speed,
+                self.state.battery_voltage,
+                self.propulsionSpecs.Kv,
+                self.propulsionSpecs.R,
+                self.propeller_array
+            )
+
+            # 상태 업데이트
+            self.state.Amps            = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.throttle        = throttle
+            # thrust 기록은 hover_simulation 방식 그대로
+            self.state.thrust         = self.weight  
+
+            # 3) 배터리 소모 & 로그
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+        
+    def waypoint_level_flight_simulation(self, waypoint_position):
+        self.dt = 0.1
+        max_steps = int(180 / self.dt)
+        self.current_motor_count = 2 
+        pos_xy = self.state.position[:2].copy()
+        vel_xy = self.state.velocity[:2].copy()
+        speed_xy = np.linalg.norm(vel_xy)
+        if speed_xy < 1e-6:
+            print("Error: zero velocity; cannot determine heading. (FIXED)")
+            return -1
+        target_xy = np.array(waypoint_position[:2])
+        delta_xy = target_xy - pos_xy
+        cross = vel_xy[0]*delta_xy[1] - vel_xy[1]*delta_xy[0]
+        dot = vel_xy.dot(delta_xy)
+        if abs(cross) > 5 or dot <= 0:
+            print(f"Error: heading {vel_xy} not aligned with waypoint {target_xy}.")
+            return -1
+        u_xy = vel_xy / speed_xy
+        self.state.velocity = np.array([u_xy[0]*speed_xy, u_xy[1]*speed_xy, 0.0])
+        for _ in range(max_steps):
+            # 1) 새로 위치·방향 계산
+            pos_xy   = self.state.position[:2]
+            delta_xy = target_xy - pos_xy
+            dist     = np.linalg.norm(delta_xy)
+            if dist < 5:          # 5 m 이내면 도착
+                return 0
+
+            u_xy = delta_xy / dist            #   <── 루프 안으로 이동
+            speed = fast_norm(self.state.velocity)
+
+            # 2) α 계산, 추진계 호출
+            alpha = self.calculate_level_alpha(self.state.velocity)
+            self.state.AOA = alpha
+            _, _, amps, power, t_per_motor = thrust_analysis(
+                self.missionParam.level_thrust_ratio,
+                speed,
+                self.state.battery_voltage,
+                self.propulsionSpecs,
+                self.propeller_array,
+                0
+            )
+            self.state.Amps = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.throttle = self.missionParam.level_thrust_ratio
+
+            # 3) 힘 / 가속
+            T_total = t_per_motor * self.presetValues.number_of_motor * g
+            CD      = float(self.CD_func(alpha))
+            D       = 0.5 * rho * speed**2 * self.analResult.Sref * CD
+            a_mag   = (T_total*np.cos(np.radians(alpha)) - D) / self.missionParam.m_takeoff
+            acc_vec = np.array([u_xy[0]*a_mag, u_xy[1]*a_mag, 0.0])
+            self.state.acceleration = acc_vec
+
+            # 4) 적분
+            self.state.time      += self.dt
+            self.state.velocity  += acc_vec * self.dt
+            self.state.position  += self.state.velocity * self.dt
+
+            # 5) 배터리·로그
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+        else:
+            print("Warning: waypoint not reached within time limit.")
+            return -1
+
+
+
+    def waypoint_turn_simulation(self, waypoint_position, direction):
+        """
+        Turn along a circle until your heading (XY) aligns with the line to waypoint_position.
+        direction: 'CW' or 'CCW'
+        """
+        # 0) setup
+        self.dt = 0.001
+        max_steps = int(180 / self.dt)      # limit 3 
+        self.current_motor_count = 2 
+        target_xy = np.array(waypoint_position[:2])
+
+        # 1) initialize
+        speed = fast_norm(self.state.velocity)
+        initial_angle = np.arctan2(self.state.velocity[1], self.state.velocity[0])
+        current_angle = initial_angle
+
+        dyn_q_base = 0.5 * rho * self.analResult.Sref
+        weight     = self.weight
+        max_load   = self.missionParam.max_load_factor
+
+        for step in range(max_steps):
+            # 1a) compute lift & turn parameters
+            speed = fast_norm(self.state.velocity)
+            dynamic_pressure = dyn_q_base * speed**2
+
+            CL_turn = min(
+                float(self.CL_func(self.analResult.AOA_turn_max)),
+                (max_load * weight) / dynamic_pressure
+            )
+
+            alpha = float(self.alpha_func(CL_turn))
+            self.state.AOA = alpha   # AOA 기록
+
+            L = dynamic_pressure * CL_turn
+            if weight / L >= 1:
+                print("Error: too heavy to turn")
+                return -1
+
+            phi = np.arccos(min(weight / L, 0.99))
+            phi = np.clip(phi, -np.radians(10), np.radians(10))
+
+            R     = (self.missionParam.m_takeoff * speed**2) / (L * np.sin(phi))
+            omega = speed / R
+
+            D = float(self.CD_func(alpha)) * dynamic_pressure
+
+            T_per_motor = (
+                determine_max_thrust(
+                    speed,
+                    self.state.battery_voltage,
+                    self.propulsionSpecs,
+                    self.propeller_array,
+                    0
+                ) * self.missionParam.turn_thrust_ratio
+            )
+            T_total = T_per_motor * self.presetValues.number_of_motor * g
+
+            # 1b) update turn center & angle
+            sin_c, cos_c = np.sin(current_angle), np.cos(current_angle)
+            if direction == "CCW":
+                center_x = self.state.position[0] - R * sin_c
+                center_y = self.state.position[1] + R * cos_c
+                current_angle += omega * self.dt
+            else:  # CW
+                center_x = self.state.position[0] + R * sin_c
+                center_y = self.state.position[1] - R * cos_c
+                current_angle -= omega * self.dt
+
+            # 1c) compute acceleration vector and integrate
+            sin_n, cos_n = np.sin(current_angle), np.cos(current_angle)
+            tangent = np.array([ cos_n,  sin_n, 0.0])
+            normal  = np.array([-sin_n,  cos_n, 0.0])
+            if direction == "CW":
+                normal *= -1
+
+            a_tan = (T_total - D) / self.missionParam.m_takeoff
+            a_cen = (L * np.sin(phi))      / self.missionParam.m_takeoff
+
+            acc = a_tan * tangent + a_cen * normal
+            self.state.acceleration = acc
+
+            # integrate velocity & position
+            self.state.velocity += acc * self.dt
+            self.state.position += self.state.velocity * self.dt
+
+            # → **시간 업데이트를 반드시** 해 줍니다.
+            self.state.time += self.dt
+
+            # 1d) throttle & amps
+            _, _, self.state.Amps, self.state.motor_input_power, self.state.throttle = \
+                thrust_reverse_solve(
+                    T_per_motor,
+                    speed,
+                    self.state.battery_voltage,
+                    self.propulsionSpecs.Kv,
+                    self.propulsionSpecs.R,
+                    self.propeller_array
+                )
+
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+
+            # 2) check alignment
+            pos_xy = self.state.position[:2]
+            vel_xy = self.state.velocity[:2]
+            delta  = target_xy - pos_xy
+            cross  = vel_xy[0]*delta[1] - vel_xy[1]*delta[0]
+            dot    = np.dot(vel_xy, delta)
+            if abs(cross) < 5 and dot > 0:
+                # heading aligned to waypoint line
+                break
+        else:
+            print("Warning: waypoint alignment not reached within time limit.")
+            return -1
+
+        return 0
+
+
+
+    def back_transition_simulation(self):
+        """
+        고정익 순항 상태에서 속도를 줄여 호버 상태(거의 0 m/s)로 전환하는 단계
+        반환값 : 0(성공) / -1(예외)
+        """
+        # ------------------------------------------------------------------
+        self.dt      = 0.1
+        t_max        = 50.0
+        steps        = int(t_max / self.dt)
+
+        mass        = self.missionParam.m_takeoff
+        W           = self.weight                     # [N]
+        Sref        = self.analResult.Sref
+        self.current_motor_count = 4                  # VTOL 모터 4개
+
+        alpha_deg   = -10.0                           # 프로펠러 10° 뒤로 tilt
+        theta       =  math.radians(alpha_deg)        # ← ‘-’ 제거!  (θ = -10°)
+        T_total     = W / math.cos(theta)             # [N]
+        thrust_per_motor_kgf = (T_total / g) / 4      # [kgf]
+
+        STOP_SPEED  = 0.10                            # m/s 이하면 정지로 간주
+        self.state.AOA = alpha_deg
+
+        # ------------------------------------------------------------------
+        for _ in range(steps):
+            speed = fast_norm(self.state.velocity)
+            if speed <= STOP_SPEED:
+                break
+
+            # 1) 스로틀 역계산
+            _, _, amps, power, throttle = thrust_reverse_solve(
+                thrust_per_motor_kgf,
+                speed,
+                self.state.battery_voltage,
+                self.propulsionSpecs.Kv,
+                self.propulsionSpecs.R,
+                self.propeller_array
+            )
+            self.state.Amps              = amps
+            self.state.motor_input_power = power * self.current_motor_count
+            self.state.throttle          = throttle
+
+            # 2) 힘 계산
+            CD   = float(self.CD_func(alpha_deg))
+            D    = 0.5 * rho * speed**2 * Sref * CD          # 항력 [N]
+            T_h  = T_total * math.sin(theta)                 # 수평추력(음수)
+            F_x  = T_h - D                                   # (대부분 음)  ← 감속
+
+            # 3) 가속도 (속도 방향 반대)
+            a_mag = F_x / mass                               # 음수
+            u_xy  = self.state.velocity[:2] / speed
+            acc   = np.array([a_mag * u_xy[0],
+                              a_mag * u_xy[1],
+                              0.0])
+            self.state.acceleration = acc
+
+            # 4) 적분
+            self.state.time     += self.dt
+            self.state.velocity += acc * self.dt
+            self.state.position += self.state.velocity * self.dt
+
+            # 5) 배터리·로그
+            self.updateBatteryState(self.state.battery_SoC)
+            self.logState()
+
+        return 0
+
+
+
+
+
+
+
+
+
+####### Simulations used in AIAA DBF #######
+
     def takeoff_simulation(self):
     
         self.dt= 0.1
@@ -488,7 +1053,6 @@ class MissionAnalyzer():
                 break
             
             if(step == max_steps-1) : return -1  
-            
 
     def climb_simulation(self, h_target, x_max_distance, direction):
         """
@@ -639,7 +1203,7 @@ class MissionAnalyzer():
                 break
             
             if step==max_steps-1 : return -1 
-
+    
     def level_flight_simulation(self, x_final, direction):
      
         #print("\nRunning Level Flight Simulation...")
@@ -751,7 +1315,6 @@ class MissionAnalyzer():
                     break
             
             if step==max_steps-1 : return -1        
-
 
     def turn_simulation(self, target_angle_deg, direction):
         """
@@ -954,6 +1517,11 @@ def fast_norm(v):
     """Faster alternative to np.linalg.norm for 3D vectors"""
     return np.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
 
+def calculate_acceleration_vertical_takeoff(v, m, Weight, T_takeoff):
+    speed = fast_norm(v)
+    a_z = (T_takeoff - Weight) / m
+    return np.array([0, 0, a_z])
+
 def calculate_acceleration_groundroll(v, m, Weight,
                                       Sref,
                                       CD_zero_flap,CL_zero_flap,
@@ -1053,190 +1621,163 @@ def visualize_mission(stateLog):
     color_list = ['red', 'green', 'blue', 'orange', 'black']
     colors = [color_list[i % len(color_list)] for i in range(len(phases))]
     
-    # Graph1 : 3D trajectory colored by phase
-    ax_3d = fig.add_subplot(gs[0:2,0], projection='3d')
+    # --- 1) 3D Trajectory 전용 Figure ---
+    fig3d = plt.figure(figsize=(6,6), dpi=100)
+    ax3d = fig3d.add_subplot(111, projection='3d')
     for phase, color in zip(phases, colors):
         mask = stateLog['phase'] == phase
-        ax_3d.plot(stateLog[mask]['position'].apply(lambda x: x[0]), 
-                  stateLog[mask]['position'].apply(lambda x: x[1]), 
-                  stateLog[mask]['position'].apply(lambda x: x[2]),
-                  color=color, label=f'Phase {phase}')
-        
-    ax_3d.set_xlabel('X')
-    ax_3d.set_ylabel('Y')
-    ax_3d.set_zlabel('Z')
-    ax_3d.set_title('3D Trajectory')
+        ax3d.plot(
+            stateLog[mask]['position'].apply(lambda x:x[0]),
+            stateLog[mask]['position'].apply(lambda x:x[1]),
+            stateLog[mask]['position'].apply(lambda x:x[2]),
+            color=color, label=f'Phase {phase}'
+        )
+    ax3d.set_xlabel('X')
+    ax3d.set_ylabel('Y')
+    ax3d.set_zlabel('Z')
+    ax3d.set_title('3D Trajectory')
+    ax3d.legend(loc='upper left', fontsize=8)
+    # 등비로 축 맞추기
+    x_lims = ax3d.get_xlim3d(); y_lims = ax3d.get_ylim3d(); z_lims = ax3d.get_zlim3d()
+    max_range = max(x_lims[1]-x_lims[0], y_lims[1]-y_lims[0])
+    x_c, y_c = np.mean(x_lims), np.mean(y_lims)
+    ax3d.set_xlim3d(x_c-max_range/2, x_c+max_range/2)
+    ax3d.set_ylim3d(y_c-max_range/2, y_c+max_range/2)
+    ax3d.set_zlim3d(0, z_lims[1]*1.2)
+    plt.tight_layout()
+    plt.show()
 
-    x_lims = ax_3d.get_xlim3d()
-    y_lims = ax_3d.get_ylim3d()
-    z_lims = ax_3d.get_zlim3d()
-    max_range = max(x_lims[1] - x_lims[0], y_lims[1] - y_lims[0])
-    x_center = (x_lims[1] + x_lims[0]) / 2
-    y_center = (y_lims[1] + y_lims[0]) / 2
-    z_center = (z_lims[1] + z_lims[0]) / 2
-    ax_3d.set_xlim3d([x_center - max_range/2, x_center + max_range/2])
-    ax_3d.set_ylim3d([y_center - max_range/2, y_center + max_range/2])
-    ax_3d.set_zlim3d([0, z_lims[1]*1.2])
 
+    # --- 2) 나머지 6개의 2D 플롯을 6×1 배열로 ---
+    fig2, axs = plt.subplots(5, 1,
+                        figsize=(8, 16),  # 세로를 충분히
+                        dpi=100,
+                        sharex=False)      # 공통 x축 쓰면 축 레이블 하나로 줄일 수 있습니다
+
+    # # (1) Top-Down View
+    # ax = axs[0]
+    # for phase, color in zip(phases, colors):
+    #     mask = stateLog['phase'] == phase
+    #     ax.plot(
+    #         stateLog[mask]['position'].apply(lambda x:x[0]),
+    #         stateLog[mask]['position'].apply(lambda x:x[1]),
+    #         color=color
+    #     )
+    # ax.set_title('Top-Down')
+    # ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
+    # ax.grid(True); ax.set_aspect('equal')
+
+    ax = axs[0]
+    for phase, color in zip(phases, colors):
+        mask = stateLog['phase'] == phase
+        ax.plot(stateLog[mask]['time'], stateLog[mask]['AOA'], color=color)
+    ax.set_ylabel('AOA (°)')
+    ax.grid(True)
+
+    # (2) Speed
+    ax = axs[1]
+    speeds = np.sqrt(stateLog['velocity'].apply(lambda v: v[0]**2+v[1]**2+v[2]**2))
+    for phase, color in zip(phases, colors):
+        mask = stateLog['phase'] == phase
+        ax.plot(stateLog[mask]['time'], speeds[mask], color=color)
+    ax.set_ylabel('Speed (m/s)')
+    ax.grid(True)
+
+    # (3) Throttle
+    ax = axs[2]
+    ax.plot(stateLog['time'], stateLog['throttle']*100, 'r-')
+    ax.set_ylabel('Throttle (%)')
+    ax.grid(True)
+
+    # (4) SoC & Voltage
+    ax = axs[3]
+    ax.plot(stateLog['time'], stateLog['battery_SoC'], 'b-', label='SoC')
+    ax.set_ylabel('SoC (%)', color='b')
+    ax.tick_params(labelcolor='b')
+    ax2 = ax.twinx()
+    ax2.plot(stateLog['time'], stateLog['battery_voltage'], 'r-', label='Volt')
+    ax2.set_ylabel('Voltage (V)', color='r')
+    ax2.tick_params(labelcolor='r')
+    ax.grid(True)
+
+    # (5) Current (마지막 축)
+    ax = axs[4]
+    ax.plot(stateLog['time'], stateLog['Amps'], 'r-')
+    ax.set_ylabel('Current (A)')
+    ax.set_xlabel('Time (s)')
+    ax.grid(True)
+    
+    fig2.suptitle(f"Total flight time : {stateLog['time'].iloc[-1]:.2f}s", y=0.98)
+    fig2.subplots_adjust(
+    top=0.93,    # suptitle과 서브플롯 사이 간격
+    bottom=0.05, # 맨 아래 서브플롯과 바닥 사이
+    left=0.1,    # 왼쪽 여백
+    right=0.95,  # 오른쪽 여백
+    hspace=0.4   # 서브플롯 간 수직 간격
+)
+    plt.tight_layout()
+    plt.show()
+
+
+    # --- 3) 기존 주석 처리된 나머지 그래프들 (필요 시 활성화) ---
+    """
     # Graph2 : Side view colored by phase
-    ax_side = fig.add_subplot(gs[2, 0])
+    fig_side = plt.figure(figsize=(6,4), dpi=100)
+    ax_side = fig_side.add_subplot(111)
     for phase, color in zip(phases, colors):
         mask = stateLog['phase'] == phase
-        ax_side.plot(stateLog[mask]['position'].apply(lambda x: x[0]), 
-                    stateLog[mask]['position'].apply(lambda x: x[2]),
-                    color=color, label=f'Phase {phase}')
+        ax_side.plot(
+            stateLog[mask]['position'].apply(lambda x: x[0]),
+            stateLog[mask]['position'].apply(lambda x: x[2]),
+            color=color, label=f'Phase {phase}'
+        )
     ax_side.set_xlabel('X Position (m)')
     ax_side.set_ylabel('Altitude (m)')
     ax_side.set_title('Side View')
     ax_side.grid(True)
-    ax_side.set_aspect(1)
+    ax_side.set_aspect('equal')
+    plt.tight_layout()
+    plt.show()
 
-
-    # Graph3 : Top-down view colored by phase
-    ax_top = fig.add_subplot(gs[0,1])
-    for phase, color in zip(phases, colors):
-        mask = stateLog['phase'] == phase
-        ax_top.plot(stateLog[mask]['position'].apply(lambda x: x[0]), 
-                   stateLog[mask]['position'].apply(lambda x: x[1]),
-                   color=color, label=f'Phase {phase}')
-    ax_top.set_xlabel('X Position (m)')
-    ax_top.set_ylabel('Y Position (m)')
-    ax_top.set_title('Top-Down View')
-    ax_top.grid(True)
-    ax_top.set_aspect('equal')
-    # ax_top.legend()
-
-    # Graph4 : AOA
-    ax_aoa = fig.add_subplot(gs[1, 1])
-    for phase, color in zip(phases, colors):
-        mask = stateLog['phase'] == phase
-        ax_aoa.plot(stateLog[mask]['time'], 
-                    stateLog[mask]['AOA'],
-                    color=color)
-    ax_aoa.set_xlabel('Time (s)')
-    ax_aoa.set_ylabel('AOA (degrees)')
-    ax_aoa.set_xlim(0,None)
-    ax_aoa.set_ylim(-3,14.3)
-    ax_aoa.set_yticks(np.arange(0, 14.1, 2))
-    ax_aoa.set_yticks(np.arange(0, 14.1, 1),minor=True)
-    ax_aoa.set_title('Angle of Attack')
-    ax_aoa.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_aoa.grid(True, which='minor', linestyle=':', linewidth=0.5)
-    
 
     # Graph5 : Bank, Pitch angle
-    ax_angles = fig.add_subplot(gs[2, 1])
-
-    ax_angles.plot(stateLog['time'], stateLog['bank_angle'], label='Bank Angle', color='blue')
-    ax_angles.set_xlabel('Time (s)')
-    ax_angles.set_ylabel('Angle (degrees)') 
-    ax_angles.plot(stateLog['time'], stateLog['climb_pitch_angle'], label='Climb Pitch Angle', color='red')
-    ax_angles.set_yticks(np.arange(0, stateLog['bank_angle'].max()+6, 5),minor=True)
-    ax_angles.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_angles.grid(True, which='minor', linestyle=':', linewidth=0.5)
-    ax_angles.set_title('Bank, Pitch Angles')
-  
+    fig_bp = plt.figure(figsize=(6,4), dpi=100)
+    ax_bp = fig_bp.add_subplot(111)
+    ax_bp.plot(stateLog['time'], stateLog['bank_angle'], label='Bank Angle', color='blue')
+    ax_bp.plot(stateLog['time'], stateLog['climb_pitch_angle'], label='Climb Pitch Angle', color='red')
+    ax_bp.set_xlabel('Time (s)'); ax_bp.set_ylabel('Angle (°)')
+    ax_bp.set_title('Bank & Pitch Angles'); ax_bp.grid(True)
+    ax_bp.legend(); plt.tight_layout(); plt.show()
 
 
-    # Graph6 : speed
-    ax_speed = fig.add_subplot(gs[0, 2])
-    speeds = np.sqrt(stateLog['velocity'].apply(lambda x: x[0]**2 + x[1]**2 + x[2]**2))
+    # Graph8 : Thrust
+    fig_th = plt.figure(figsize=(6,4), dpi=100)
+    ax_th = fig_th.add_subplot(111)
+    ax_th.plot(stateLog['time'], stateLog['thrust'], 'r-')
+    ax_th.set_xlabel('Time (s)'); ax_th.set_ylabel('Thrust (kg)')
+    ax_th.set_title('Thrust'); ax_th.grid(True)
+    plt.tight_layout(); plt.show()
+
+
+    # Graph9 : Load factor
+    fig_lf = plt.figure(figsize=(6,4), dpi=100)
+    ax_lf = fig_lf.add_subplot(111)
     for phase, color in zip(phases, colors):
-        mask = stateLog['phase'] == phase
-        ax_speed.plot(stateLog[mask]['time'], speeds[mask], 
-                     color=color, label=f'Phase {phase}')
-    ax_speed.set_xlabel('Time (s)')
-    ax_speed.set_ylabel('Speed (m/s)')
-    ax_speed.set_title('Speed by Phase')
-    ax_speed.set_yticks(np.arange(0, max(speeds)+6, 5),minor=True)
-    ax_speed.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_speed.grid(True, which='minor', linestyle=':', linewidth=0.5)
-    
-    # Graph7 : throttle
-    ax_throttle = fig.add_subplot(gs[1, 2])
-    ax_throttle.plot(stateLog['time'], stateLog['throttle']*100,'r-')
-    ax_throttle.set_ylim(40,100)
-    ax_throttle.set_title('Throttle level')
-    ax_throttle.set_xlabel('Time (s)')
-    ax_throttle.set_ylabel('Throttle (%)')
-    ax_throttle.tick_params(axis='y')
-    ax_throttle.set_yticks(np.arange(40, 101, 5),minor=True)
-    ax_throttle.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_throttle.grid(True, which='minor', linestyle=':', linewidth=0.5)
-    
+        mask = stateLog['phase']==phase
+        ax_lf.plot(stateLog[mask]['time'], stateLog[mask]['loadfactor'], color=color)
+    ax_lf.set_xlabel('Time (s)'); ax_lf.set_ylabel('Load Factor')
+    ax_lf.set_title('Load Factor by Phase'); ax_lf.grid(True)
+    plt.tight_layout(); plt.show()
 
-    # Graph8 : thrust
-    ax_thrust = fig.add_subplot(gs[2, 2])
-    ax_thrust.plot(stateLog['time'], stateLog['thrust'],'r-', label='Thrust')
-    ax_thrust.set_ylim(0,max(stateLog['thrust'])+1)
-    ax_thrust.tick_params(axis='y')
-    ax_thrust.set_yticks(np.arange(0, max(stateLog['thrust'])+0.5, 1),minor=True)
-    ax_thrust.set_title('Thrust')
-    ax_thrust.set_xlabel('Time (s)')
-    ax_thrust.set_ylabel('Thrust (kg)')
-    ax_thrust.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_thrust.grid(True, which='minor', linestyle=':', linewidth=0.5)
 
-    # Graph9 :Load factor
-    ax_load = fig.add_subplot(gs[0, 3])
-    for phase, color in zip(phases, colors):
-        mask = stateLog['phase'] == phase
-        ax_load.plot(stateLog[mask]['time'], 
-                    stateLog[mask]['loadfactor'], 
-                    color=color, label=f'Phase {phase}')
-    ax_load.tick_params(axis='y')
-    ax_load.set_yticks(np.arange(0, max(stateLog['loadfactor'])+0.5, 1),minor=True)
-    ax_load.set_xlabel('Time (s)')
-    ax_load.set_ylabel('Load Factor')
-    ax_load.set_title('Load Factor by Phase')
-    ax_load.grid(True, which='major', linestyle='-', linewidth=1) 
-    ax_load.grid(True, which='minor', linestyle=':', linewidth=0.5)
-
-    # Graph10 : SoC, Voltage
-    ax_SoC = fig.add_subplot(gs[1, 3])
-
-    ax_SoC.plot(stateLog['time'], stateLog['battery_SoC'], label='SoC', color='blue')
-    ax_SoC.set_xlabel('Time (s)')
-    ax_SoC.set_ylabel('SoC (%)', color='blue')
-    ax_SoC.set_ylim(0,100)
-    ax_SoC.set_yticks(np.arange(0, 100+0.5, 20))
-    ax_SoC.grid(True)
-
-    ax_voltage = ax_SoC.twinx()  
-    ax_voltage.plot(stateLog['time'], stateLog['battery_voltage'], label='voltage', color='red')
-    ax_voltage.set_ylabel('Voltage(V)', color='red')
-    ax_voltage.set_ylim(22,25.5)
-    ax_voltage.set_yticks(np.arange(21, 25.6, 1.0))
-    ax_voltage.set_yticks(np.arange(21, 25.6, 0.5),minor=True)
-    ax_voltage.tick_params(axis='y', labelcolor='red') 
-    ax_voltage.grid(True, linestyle=':', linewidth=0.5)  
-    ax_voltage.grid(True, which='minor',linestyle=':', linewidth=0.5)  
-    ax_SoC.set_title('SoC, Voltage')
-
-    
-    # Graph11 : Amps
-    ax_amps = fig.add_subplot(gs[2, 3])
-    ax_amps.plot(stateLog['time'], stateLog['Amps'], color='red')
-    ax_amps.set_xlabel('Time (s)')
-    ax_amps.set_ylabel('Current (A)')
-    ax_amps.set_title('Current')
-    ax_amps.grid(True)
-
-    # Graph12 : Phase
-    ax_phase = fig.add_subplot(gs[3, :])
-    ax_phase.step(stateLog['time'], stateLog['phase'], where='post', color='purple')
-    ax_phase.set_xlabel('Time (s)')
-    ax_phase.set_ylabel('Phase')
-    ax_phase.set_title('Mission Phases')
-    ax_phase.set_yticks(phases)
-    ax_phase.grid(True, which='major', linestyle='-', linewidth=1)
-    ax_phase.grid(True, which='minor', linestyle=':', linewidth=0.5)
-
-    plt.suptitle(f"Mission : {stateLog['mission'].iloc[0]}        Total flight time : {stateLog['time'].iloc[-1]:.2f}s        N_laps : {stateLog['N_laps'].iloc[-1]}", fontsize = 16, y = 0.95)
-
-    
-    plt.tight_layout(rect=[0, 0, 1, 0.93])
-    plt.show()
+    # Graph12 : Mission Phase Step
+    fig_ph = plt.figure(figsize=(6,2), dpi=100)
+    ax_ph = fig_ph.add_subplot(111)
+    ax_ph.step(stateLog['time'], stateLog['phase'], where='post', color='purple')
+    ax_ph.set_xlabel('Time (s)'); ax_ph.set_ylabel('Phase')
+    ax_ph.set_title('Mission Phases'); ax_ph.set_yticks(phases); ax_ph.grid(True)
+    plt.tight_layout(); plt.show()
+    """
 
 
 if __name__=="__main__":
@@ -1249,7 +1790,8 @@ if __name__=="__main__":
         max_load_factor = 4.0,               # Fixed
         climb_thrust_ratio = 0.9,
         level_thrust_ratio = 0.5,
-        turn_thrust_ratio = 0.5,               
+        turn_thrust_ratio = 0.5,
+                      
         propeller_data_path = "data/propDataCSV/PER3_8x6E.csv", 
 
     )
@@ -1258,12 +1800,12 @@ if __name__=="__main__":
         m_x1 = 200,                         # g
         x1_time_margin = 150,                # sec
         
-        throttle_takeoff = 0.9,             # 0~1
+        throttle_takeoff = 0.6,             # 0~1
         max_climb_angle = 40,                 #deg
         max_load = 30,                      # kg
         h_flap_transition = 5,              # m
         
-        number_of_motor = 2,                 
+        number_of_motor = 2,            
         min_battery_voltage = 21.8,         # V 
         score_weight_ratio = 0.5            # mission2/3 score weight ratio (0~1)
         )
